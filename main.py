@@ -1,16 +1,21 @@
+"""
+================================================
+  PRDC Swap — Interface Streamlit
+  Hajji Achraf — Stagiaire PFE
+================================================
+"""
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-
 st.set_page_config(page_title="PRDC Swap", layout="wide")
 st.title("📊 PRDC Swap — Simulation du Payoff")
 st.divider()
 
-
-
+# ═══════════════════════════════════════════════
+#  SIDEBAR
 # ═══════════════════════════════════════════════
 with st.sidebar:
 
@@ -37,16 +42,10 @@ with st.sidebar:
 #  FONCTIONS
 # ═══════════════════════════════════════════════
 def payoff(S, S0, cf, cd):
-    """Ci = max( cf * S/S0 - cd , 0 )"""
     return np.maximum(cf * S / S0 - cd, 0.0)
 
 
 def simulate(S0, mu, sigma, T, seed):
-    """
-    Euler-Maruyama mensuel.
-    t[0]=0 → début contrat (pas de coupon)
-    t[1..N] → fin de chaque mois → coupon possible
-    """
     np.random.seed(int(seed))
     N         = T * 12
     dt        = 1.0 / 12
@@ -60,16 +59,10 @@ def simulate(S0, mu, sigma, T, seed):
 
 
 def cashflows(t, S, S0, cf, cd, er, ko_B):
-    """
-    Calcule les coupons mois par mois.
-    Commence à i=1 (jamais i=0).
-    S'arrête si S(t) >= ko_B (KO déclenché).
-    """
     rows = []
     for i in range(1, len(t)):
         s = S[i]
-
-        if s >= ko_B:                          # ← KO toujours actif
+        if s >= ko_B:
             rows.append({
                 "Période":   f"Mois {i}",
                 "t (ans)":   round(t[i], 4),
@@ -80,7 +73,6 @@ def cashflows(t, S, S0, cf, cd, er, ko_B):
                 "État":      "KO ❌"
             })
             break
-
         c  = payoff(s, S0, cf, cd)
         pv = c * np.exp(-er * t[i])
         rows.append({
@@ -92,20 +84,17 @@ def cashflows(t, S, S0, cf, cd, er, ko_B):
             "PV Coupon": round(pv, 6),
             "État":      "✅ Actif" if c > 0 else "🟡 Floor"
         })
-
     return pd.DataFrame(rows).set_index("Période")
 
 
 # ═══════════════════════════════════════════════
-#  CALCULS  (automatiques à chaque changement)
+#  CALCULS
 # ═══════════════════════════════════════════════
-S_star = (cd / cf) * S0
-t, S_path = simulate(S0, mu, sigma, T, seed)
-df = cashflows(t, S_path, S0, cf, cd, er, ko_B)
-
-ko_row  = df[df["État"] == "KO ❌"]
-ko_date = ko_row.iloc[0]["t (ans)"] if not ko_row.empty else None
-
+S_star       = (cd / cf) * S0
+t, S_path    = simulate(S0, mu, sigma, T, seed)
+df           = cashflows(t, S_path, S0, cf, cd, er, ko_B)
+ko_row       = df[df["État"] == "KO ❌"]
+ko_date      = ko_row.iloc[0]["t (ans)"] if not ko_row.empty else None
 total_coupon = df["Coupon"].sum()
 total_pv     = df["PV Coupon"].sum()
 
@@ -130,46 +119,78 @@ tab1, tab2, tab3 = st.tabs(["📈 Payoff", "📉 Trajectoire S(t)", "💰 Coupon
 # ───────────────────────────────────────────────
 #  ONGLET 1 — Payoff
 # ───────────────────────────────────────────────
-# ── Données du graphe ────────────────────────
-S_range = np.linspace(S0 * 0.3, S0 * 2.5, 400)
-C_range = payoff(S_range, S0, cf, cd)
+with tab1:
 
-# ✅ Après la barrière B → coupon = 0 (produit arrêté)
-C_avec_ko = np.where(S_range >= ko_B, 0.0, C_range)
+   
 
-fig1, ax1 = plt.subplots(figsize=(8, 4))
+    # ✅ Formule mathématique
+    st.latex(r"""
+        C_i = \max\!\left(
+            {c_f \cdot \frac{S(t_i)}{S_0}}
+            -
+            {c_d}
+            \;,\; 0
+        \right)
+    """)
+
+    # ✅ Explication des paramètres
+    st.info(
+        "**Paramètres :**\n\n"
+        r"- $c_f$ = coupon étranger — pente du payoff"                           "\n\n"
+        r"- $S(t_i)$ = taux de change à la date $t_i$"                          "\n\n"
+        r"- $S_0$ = taux de change initial (référence)"                          "\n\n"
+        r"- $c_d$ = coupon domestique — plancher"                                "\n\n"
+        r"- $S^* = \dfrac{c_d}{c_f} \times S_0$ = seuil de déclenchement du coupon" "\n\n"
+        r"- $B$ = barrière KO — si $S(t_i) \geq B$ → produit désactivé, $C_i = 0$"
+    )
+
+    # ✅ Valeurs numériques actuelles
+    st.success(
+        f"Avec vos paramètres :  "
+        f"$S^* = {S_star:.2f}$  |  "
+        f"Barrière $B = {ko_B}$"
+    )
+
+    # ── Données du graphe ───────────────────────
+    S_range   = np.linspace(S0 * 0.3, S0 * 2.5, 400)
+    C_range   = payoff(S_range, S0, cf, cd)
+
+    # Après la barrière B → coupon = 0 (produit arrêté)
+    C_avec_ko = np.where(S_range >= ko_B, 0.0, C_range)
+
+    fig1, ax1 = plt.subplots(figsize=(8, 4))
+
+   
+
+    # Zone teal — zone de profit (S* < S < B)
+    ax1.fill_between(S_range, C_avec_ko,
+                     where=((S_range >= S_star) & (S_range < ko_B)),
+                     color="teal", alpha=0.25,
+                     label="Zone de profit  (Cᵢ > 0)")
 
 
+    # Courbe payoff avec arrêt à B
+    ax1.plot(S_range, C_avec_ko, color="teal", linewidth=2.5, label="Payoff PRDC")
 
-# Zone teal — zone de profit (S* < S < B)
-ax1.fill_between(S_range, C_avec_ko,
-                 where=((S_range >= S_star) & (S_range < ko_B)),
-                 color="teal", alpha=0.25,
-                 label="Zone de profit  (Cᵢ > 0)")
+   
+
+   
+
+    # Lignes de référence
+    ax1.axvline(S_star, color="gold",      linestyle="--", label=f"Seuil S* = {S_star:.2f}")
+    ax1.axvline(S0,     color="steelblue", linestyle=":",  label=f"S₀ = {S0}")
+    ax1.axvline(ko_B,   color="red",       linestyle="-.", linewidth=2,
+                label=f"Barrière KO = {ko_B}")
+    ax1.axhline(0, color="gray", linewidth=0.5, alpha=0.4)
+
+    ax1.set_xlabel("Taux de change S")
+    ax1.set_ylabel("Coupon Cᵢ")
+    ax1.legend(fontsize=8)
+    ax1.grid(alpha=0.3)
+    st.pyplot(fig1)
 
 
-
-# Courbe payoff avec arrêt à B
-ax1.plot(S_range, C_avec_ko, color="teal", linewidth=2.5, label="Payoff PRDC")
-
-
-
-
-
-# Lignes de référence
-ax1.axvline(S_star, color="gold",      linestyle="--", label=f"Seuil S* = {S_star:.2f}")
-ax1.axvline(S0,     color="steelblue", linestyle=":",  label=f"S₀ = {S0}")
-ax1.axvline(ko_B,   color="red",       linestyle="-.", linewidth=2,
-            label=f"Barrière KO = {ko_B}")
-ax1.axhline(0, color="gray", linewidth=0.5, alpha=0.4)
-
-ax1.set_xlabel("Taux de change S")
-ax1.set_ylabel("Coupon Cᵢ")
-ax1.legend(fontsize=8)
-ax1.grid(alpha=0.3)
-st.pyplot(fig1)
-
-# ───────────────────────────────────────────────
+# ──────────────────────────────��────────────────
 #  ONGLET 2 — Trajectoire S(t)
 # ───────────────────────────────────────────────
 with tab2:
@@ -189,7 +210,6 @@ with tab2:
 
     fig2, ax2 = plt.subplots(figsize=(8, 4))
     ax2.plot(t, S_path, color="teal", linewidth=2, label="S(t)")
-    
     df_obs = df[df["État"] != "KO ❌"]
     ax2.scatter(df_obs["t (ans)"], df_obs["S(t)"],
                 color="teal", s=15, alpha=0.4, zorder=4,
@@ -214,7 +234,6 @@ with tab2:
 with tab3:
 
     st.subheader("Coupons reçus — ce scénario")
-    
 
     st.latex(r"""
         C_i = \max\!\left( c_f \cdot \frac{S(t_i)}{S_0} - c_d \;,\; 0 \right)
@@ -263,8 +282,6 @@ with tab3:
         use_container_width=True,
         height=400,
     )
-
-    
 
     if ko_date:
         st.error(f"🔴 Produit KO à t = {ko_date} ans — plus de coupons après.")
