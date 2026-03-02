@@ -130,54 +130,44 @@ tab1, tab2, tab3 = st.tabs(["📈 Payoff", "📉 Trajectoire S(t)", "💰 Coupon
 # ───────────────────────────────────────────────
 #  ONGLET 1 — Payoff
 # ───────────────────────────────────────────────
-with tab1:
+# ── Données du graphe ────────────────────────
+S_range = np.linspace(S0 * 0.3, S0 * 2.5, 400)
+C_range = payoff(S_range, S0, cf, cd)
 
-    
+# ✅ Après la barrière B → coupon = 0 (produit arrêté)
+C_avec_ko = np.where(S_range >= ko_B, 0.0, C_range)
 
-    st.latex(r"""
-        C_i = \max\!\left(
-            {c_f \cdot \frac{S(t_i)}{S_0}}
-            -
-            {c_d}
-            \;,\; 0
-        \right)
-    """)
+fig1, ax1 = plt.subplots(figsize=(8, 4))
 
-    st.info(
-        "**Paramètres :**\n\n"
-        r"- $c_f$ = coupon étranger — pente du payoff" "\n\n"
-        r"- $S(t_i)$ = taux de change à la date $t_i$" "\n\n"
-        r"- $S_0$ = taux de change initial" "\n\n"
-        r"- $c_d$ = coupon domestique — plancher"       "\n\n"
-        r"- $S^* = \dfrac{c_d}{c_f} \times S_0$ = seuil de déclenchement du coupon" "\n\n"
-        r"- $B$ = barrière KO — si $S(t_i) \geq B$ → produit désactivé"
-    )
 
-    st.success(
-        f"Avec vos paramètres :  "
-        f"$S^* = {S_star:.2f}$  |  "
-        f"Barrière $B = {ko_B}$"
-    )
 
-    S_range = np.linspace(S0 * 0.3, S0 * 2.5, 400)
-    C_range = payoff(S_range, S0, cf, cd)
+# Zone teal — zone de profit (S* < S < B)
+ax1.fill_between(S_range, C_avec_ko,
+                 where=((S_range >= S_star) & (S_range < ko_B)),
+                 color="teal", alpha=0.25,
+                 label="Zone de profit  (Cᵢ > 0)")
 
-    fig1, ax1 = plt.subplots(figsize=(8, 4))
-    ax1.fill_between(S_range, C_range,
-                     where=(S_range >= S_star), color="teal", alpha=0.25,   
-                     label="Coupon positif")
-    ax1.plot(S_range, C_range, color="teal", linewidth=2.5, label="Payoff PRDC")
-    ax1.axvline(S_star, color="gold",      linestyle="--", label=f"Seuil S* = {S_star:.1f}")
-    ax1.axvline(S0,     color="steelblue", linestyle=":",  label=f"S₀ = {S0}")
-    ax1.axvline(ko_B,   color="red",       linestyle="-.", linewidth=2,
-                label=f"Barrière KO = {ko_B}")
-    ax1.axhline(0, color="gray", linewidth=0.5, alpha=0.4)
-    ax1.set_xlabel("Taux de change S")
-    ax1.set_ylabel("Coupon Cᵢ")
-    ax1.legend(fontsize=8)
-    ax1.grid(alpha=0.3)
-    st.pyplot(fig1)
 
+
+# Courbe payoff avec arrêt à B
+ax1.plot(S_range, C_avec_ko, color="teal", linewidth=2.5, label="Payoff PRDC")
+
+
+
+
+
+# Lignes de référence
+ax1.axvline(S_star, color="gold",      linestyle="--", label=f"Seuil S* = {S_star:.2f}")
+ax1.axvline(S0,     color="steelblue", linestyle=":",  label=f"S₀ = {S0}")
+ax1.axvline(ko_B,   color="red",       linestyle="-.", linewidth=2,
+            label=f"Barrière KO = {ko_B}")
+ax1.axhline(0, color="gray", linewidth=0.5, alpha=0.4)
+
+ax1.set_xlabel("Taux de change S")
+ax1.set_ylabel("Coupon Cᵢ")
+ax1.legend(fontsize=8)
+ax1.grid(alpha=0.3)
+st.pyplot(fig1)
 
 # ───────────────────────────────────────────────
 #  ONGLET 2 — Trajectoire S(t)
