@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -8,9 +9,7 @@ st.set_page_config(page_title="PRDC Swap", layout="wide")
 st.title("PRDC Swap — Simulation du Payoff")
 st.divider()
 
-# ═══════════════════════════════════════════════
-#  SIDEBAR
-# ═══════════════════════════════════════════════
+
 with st.sidebar:
     st.header("Parametres du produit")
     S0    = st.slider("S0 — taux de change initial",  50,    200,  110)
@@ -25,13 +24,12 @@ with st.sidebar:
     mu    = st.slider("mu — drift",         -0.10, 0.15, 0.03, step=0.005)
 
     st.divider()
-    st.subheader("Barriere KO")
+    st.subheader("Barriere KO Europeenne")
     ko_B  = st.slider("Niveau barriere B", S0, S0 * 3, int(S0 * 1.5), step=1)
+    st.caption("Barriere europeenne : observe uniquement a la date Ti")
 
 
-# ═══════════════════════════════════════════════
-#  FONCTIONS
-# ═══════════════════════════════════════════════
+
 def payoff(S, S0, cf, cd):
     return np.maximum(cf * S / S0 - cd, 0.0)
 
@@ -50,6 +48,13 @@ def simulate(S0, mu, sigma, T):
 
 
 def cashflows(t, S, S0, cf, cd, er, ko_B):
+    """
+    Barriere EUROPEENNE :
+    - On observe S uniquement a la date Ti (pas en continu)
+    - Si S(Ti) >= B  → coupon = 0 a cette date UNIQUEMENT
+    - Le produit CONTINUE les periodes suivantes
+    - Indicatrice : 1{S(Ti) < B}
+    """
     rows    = []
     N_steps = len(t) - 1
     T_int   = int(round(t[-1]))
@@ -60,69 +65,64 @@ def cashflows(t, S, S0, cf, cd, er, ko_B):
         ti  = t[idx]
         s   = S[idx]
 
-        if s >= ko_B:
-            rows.append({
-                "Periode":   f"T{i}",
-                "t (ans)":   round(ti, 2),
-                "S(t)":      round(s, 2),
-                "Coupon":    0.0,
-                "PV Coupon": 0.0,
-                "Etat":      "KO"
-            })
-            break
+        
+        indicatrice = 1 if s < ko_B else 0
 
-        c  = payoff(s, S0, cf, cd)
+        c  = indicatrice * payoff(s, S0, cf, cd)
         pv = c * np.exp(-er * ti)
+
+        if indicatrice == 0:
+            etat = "KO (cette date)"      
+        elif c == 0:
+            etat = "Floor"
+        else:
+            etat = "Actif"
+
         rows.append({
-            "Periode":   f"T{i}",
-            "t (ans)":   round(ti, 2),
-            "S(t)":      round(s, 2),
-            "Coupon":    round(c, 6),
-            "PV Coupon": round(pv, 6),
-            "Etat":      "Actif" if c > 0 else "Floor"
+            "Periode":        f"T{i}",
+            "t (ans)":        round(ti, 2),
+            "S(t)":           round(s, 2),
+            "1{S<B}":         indicatrice,  
+            "Coupon":         round(c, 6),
+            "PV Coupon":      round(pv, 6),
+            "Etat":           etat
         })
 
     return pd.DataFrame(rows).set_index("Periode")
 
 
-# ══════════════════��════════════════════════════
-#  CALCULS
-# ═══════════════════════════════════════════════
+
 S_star       = (cd / cf) * S0
 t, S_path    = simulate(S0, mu, sigma, T)
 df           = cashflows(t, S_path, S0, cf, cd, er, ko_B)
-ko_row       = df[df["Etat"] == "KO"]
-ko_date      = ko_row.iloc[0]["t (ans)"] if not ko_row.empty else None
+ko_dates     = df[df["Etat"] == "KO (cette date)"]["t (ans)"].tolist()
 total_coupon = df["Coupon"].sum()
 total_pv     = df["PV Coupon"].sum()
 flux_dates   = np.arange(1, T + 1)
 
 
-# ═══════════════════════════════════════════════
-#  METRIQUES
-# ═══════════════════════════════════════════════
 
 
 
 
 
-# ═══════════════════════════════════════════════
-#  SECTION 1 — PAYOFF
-# ═══════════════════════════════════════════════
 st.subheader("Section 1 — Structure du Payoff")
 
-st.latex(r"C_i = \max\!\left( c_f \cdot \frac{S(t_i)}{S_0} - c_d \;,\; 0 \right)")
+st.latex(r"""
+    C_i = \mathbf{1}_{\{S(t_i) < B\}} \cdot
+    \max\!\left( c_f \cdot \frac{S(t_i)}{S_0} - c_d \;,\; 0 \right)
+""")
 
 st.info(
-    "- cf = taux etranger rf — pente du payoff\n\n"
-    "- cd = taux domestique rd — plancher\n\n"
+    "- cf = taux etranger rf \n\n"
+    "- cd = taux domestique rd \n\n"
     "- S(ti) = taux de change a la date ti\n\n"
     "- S0 = taux de change initial\n\n"
     "- S* = (cd/cf) x S0 = seuil de declenchement\n\n"
-    "- B = barriere KO — si S(ti) >= B, produit desactive"
+    "- B = barriere KO europeenne\n\n"
 )
 
-st.success(f"S* = {S_star:.2f}  |  Barriere B = {ko_B}")
+st.success(f"S* = {S_star:.2f}  |  Barriere B = {ko_B}  ")
 
 S_range   = np.linspace(S0 * 0.3, S0 * 2.5, 400)
 C_avec_ko = np.where(S_range >= ko_B, 0.0, payoff(S_range, S0, cf, cd))
@@ -145,9 +145,7 @@ st.pyplot(fig1)
 st.divider()
 
 
-# ═══════════════════════════════════════════════
-#  SECTION 2 — SIMULATION S(t)
-# ═══════════════════════════════════════════════
+
 st.subheader("Section 2 — Simulation du taux de change S(t)")
 
 st.latex(r"S_{i+1} = S_i \left(1 + \mu\,\Delta t + \sigma\sqrt{\Delta t}\,Z_i\right), \quad Z_i \sim \mathcal{N}(0,1)")
@@ -155,7 +153,7 @@ st.latex(r"S_{i+1} = S_i \left(1 + \mu\,\Delta t + \sigma\sqrt{\Delta t}\,Z_i\ri
 st.info(
     "- mu = drift annuel\n\n"
     "- sigma = volatilite annuelle\n\n"
-    "- N = T x 1000 pas (discretisation fine)"
+
 )
 
 fig2, ax2 = plt.subplots(figsize=(10, 5))
@@ -166,20 +164,25 @@ for i, ti in enumerate(flux_dates):
         idx  = int(round(ti * (len(t) - 1) / T))
         idx  = min(idx, len(S_path) - 1)
         s_ti = S_path[idx]
-        ax2.axvline(ti, color="purple", linestyle=":", linewidth=1.2, alpha=0.6)
+
+        # Couleur du cercle selon indicatrice
+        ko_at_ti = s_ti >= ko_B
+        edge_col = "red" if ko_at_ti else "purple"
+
+        ax2.axvline(ti, color=edge_col, linestyle=":", linewidth=1.2, alpha=0.6)
         ax2.scatter([ti], [s_ti], color="white", s=80, zorder=6,
-                    edgecolors="purple", linewidth=2)
-        ax2.annotate(f"T{i+1}", xy=(ti, s_ti),
-                     xytext=(ti + 0.05, s_ti + S0 * 0.03),
-                     fontsize=9, color="purple", fontweight="bold",
-                     arrowprops=dict(arrowstyle="-", color="purple", lw=0.8))
+                    edgecolors=edge_col, linewidth=2)
+        ax2.annotate(
+            f"T{i+1}" + (" [KO]" if ko_at_ti else ""),
+            xy=(ti, s_ti),
+            xytext=(ti + 0.05, s_ti + S0 * 0.03),
+            fontsize=8, color=edge_col, fontweight="bold",
+            arrowprops=dict(arrowstyle="-", color=edge_col, lw=0.8)
+        )
 
 ax2.axhline(S_star, color="gold",      linestyle="--", label=f"S* = {S_star:.1f}")
 ax2.axhline(S0,     color="steelblue", linestyle=":",  label=f"S0 = {S0}")
 ax2.axhline(ko_B,   color="red",       linestyle="-.", linewidth=2, label=f"KO = {ko_B}")
-if ko_date:
-    ax2.axvline(ko_date, color="red", linewidth=2,
-                label=f"KO a t = {ko_date} ans")
 ax2.set_xlabel("Temps (annees)")
 ax2.set_ylabel("S(t)")
 ax2.legend(fontsize=7)
@@ -189,20 +192,24 @@ st.pyplot(fig2)
 st.divider()
 
 
-# ═══════════════════════════════════════════════
-#  SECTION 3 — COUPONS ANNUELS + TABLEAU
-# ═════════════════════��═════════════════════════
+
 st.subheader("Section 3 — Coupons annuels et Valeur du Swap")
 
-st.latex(r"\text{PV}_i = C_i \cdot e^{-er \cdot t_i}")
-
-
+st.latex(r"""
+    C_i = \mathbf{1}_{\{S(t_i) < B\}} \cdot
+    \max\!\left( c_f \cdot \frac{S(t_i)}{S_0} - c_d \;,\; 0 \right)
+    \qquad
+    \text{PV}_i = C_i \cdot e^{-er \cdot t_i}
+""")
 
 st.markdown("#### Tableau des coupons annuels")
 st.dataframe(
     df.style
-      .format({"t (ans)": "{:.2f}", "S(t)": "{:.2f}",
-               "Coupon": "{:.6f}", "PV Coupon": "{:.6f}"})
+      .format({"t (ans)":   "{:.2f}",
+               "S(t)":      "{:.2f}",
+               "1{S<B}":    "{:.0f}",
+               "Coupon":    "{:.6f}",
+               "PV Coupon": "{:.6f}"})
       .applymap(
           lambda v: "color: teal" if isinstance(v, float) and v > 0
                else "color: red"  if isinstance(v, float) and v == 0
@@ -213,7 +220,4 @@ st.dataframe(
 
 st.markdown("---")
 
-if ko_date:
-    st.error(f"Produit KO a t = {ko_date} ans")
-else:
-    st.success("Produit actif jusqu'a maturite")
+
